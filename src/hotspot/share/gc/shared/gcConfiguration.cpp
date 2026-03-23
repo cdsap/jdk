@@ -34,7 +34,7 @@
 #include "utilities/debug.hpp"
 
 GCName GCConfiguration::young_collector() const {
-  if (UseG1GC) {
+  if (UseImNotOkayGC || UseG1GC) {
     return G1New;
   }
 
@@ -58,7 +58,7 @@ GCName GCConfiguration::young_collector() const {
 }
 
 GCName GCConfiguration::old_collector() const {
-  if (UseG1GC) {
+  if (UseImNotOkayGC || UseG1GC) {
     return G1Old;
   }
 

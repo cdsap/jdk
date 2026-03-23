@@ -161,7 +161,7 @@ void G1Arguments::initialize_card_set_configuration() {
 
 void G1Arguments::initialize() {
   GCArguments::initialize();
-  assert(UseG1GC, "Error");
+  assert(UseG1GC || UseImNotOkayGC, "Error");
   FLAG_SET_DEFAULT(ParallelGCThreads, WorkerPolicy::parallel_worker_threads());
   if (ParallelGCThreads == 0) {
     assert(!FLAG_IS_DEFAULT(ParallelGCThreads), "The default value for ParallelGCThreads should not be 0.");

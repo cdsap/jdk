@@ -109,6 +109,9 @@
   product(bool, UseG1GC, false,                                             \
           "Use the Garbage-First garbage collector")                        \
                                                                             \
+  product(bool, UseImNotOkayGC, false, EXPERIMENTAL,                        \
+          "Use the ImNotOkay garbage collector mode built on G1 internals") \
+                                                                            \
   product(bool, UseParallelGC, false,                                       \
           "Use the Parallel garbage collector.")                            \
                                                                             \

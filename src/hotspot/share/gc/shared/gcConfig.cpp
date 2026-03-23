@@ -68,6 +68,7 @@ SHENANDOAHGC_ONLY(static ShenandoahArguments shenandoahArguments;)
 // line flag, CollectedHeap::Name and GCArguments instance.
 static const IncludedGC IncludedGCs[] = {
    EPSILONGC_ONLY_ARG(IncludedGC(UseEpsilonGC,       CollectedHeap::Epsilon,    epsilonArguments,    "epsilon gc"))
+        G1GC_ONLY_ARG(IncludedGC(UseImNotOkayGC,     CollectedHeap::G1,         g1Arguments,         "imnotokay gc"))
         G1GC_ONLY_ARG(IncludedGC(UseG1GC,            CollectedHeap::G1,         g1Arguments,         "g1 gc"))
   PARALLELGC_ONLY_ARG(IncludedGC(UseParallelGC,      CollectedHeap::Parallel,   parallelArguments,   "parallel gc"))
     SERIALGC_ONLY_ARG(IncludedGC(UseSerialGC,        CollectedHeap::Serial,     serialArguments,     "serial gc"))
@@ -88,6 +89,7 @@ bool GCConfig::_gc_selected_ergonomically = false;
 
 void GCConfig::fail_if_non_included_gc_is_selected() {
   NOT_EPSILONGC(   FAIL_IF_SELECTED(UseEpsilonGC));
+  NOT_G1GC(        FAIL_IF_SELECTED(UseImNotOkayGC));
   NOT_G1GC(        FAIL_IF_SELECTED(UseG1GC));
   NOT_PARALLELGC(  FAIL_IF_SELECTED(UseParallelGC));
   NOT_SERIALGC(    FAIL_IF_SELECTED(UseSerialGC));
@@ -140,6 +142,10 @@ bool GCConfig::is_exactly_one_gc_selected() {
 }
 
 GCArguments* GCConfig::select_gc() {
+  if (UseImNotOkayGC) {
+    FLAG_SET_ERGO(UseG1GC, true);
+  }
+
   // Fail immediately if an unsupported GC is selected
   fail_if_non_included_gc_is_selected();
 

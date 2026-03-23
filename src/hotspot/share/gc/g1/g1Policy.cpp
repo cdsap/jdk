@@ -258,6 +258,7 @@ uint G1Policy::calculate_young_desired_length(size_t pending_cards,
   // young length we might have exceeded absolute min length or absolute_max_length,
   // so adjust the result accordingly.
   uint absolute_max_young_length = MAX2(max_young_length_by_sizer, absolute_min_young_length);
+  absolute_max_young_length = adjusted_max_young_length(absolute_min_young_length, absolute_max_young_length);
 
   uint desired_eden_length_by_mmu = 0;
   uint desired_eden_length_by_pause = 0;
@@ -412,6 +413,89 @@ uint G1Policy::calculate_desired_eden_length_by_pause(double base_time_ms,
   }
 }
 
+double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
+  const double target_pause_time_ms = _mmu_tracker->max_gc_time() * 1000.0;
+
+  if (!UseImNotOkayGC || ImNotOkayPauseHeadroomPercent == 0) {
+    return target_pause_time_ms;
+  }
+
+  const double trigger_ratio = (double)ImNotOkayPauseHeadroomTriggerPercent / 100.0;
+  const double base_time_ratio = target_pause_time_ms > 0.0 ? base_time_ms / target_pause_time_ms : 0.0;
+  if (base_time_ratio < trigger_ratio) {
+    return target_pause_time_ms;
+  }
+
+  const double headroom_ratio = (double)ImNotOkayPauseHeadroomPercent / 100.0;
+  const double adjusted_target = MAX2(target_pause_time_ms * (1.0 - headroom_ratio), 1.0);
+
+  log_debug(gc, ergo, heap)(
+    "Applying ImNotOkay pause headroom. base time: %.2fms target pause: %.2fms adjusted target: %.2fms "
+    "trigger: %u%% headroom: %u%%",
+    base_time_ms,
+    target_pause_time_ms,
+    adjusted_target,
+    ImNotOkayPauseHeadroomTriggerPercent,
+    ImNotOkayPauseHeadroomPercent
+  );
+
+  return adjusted_target;
+}
+
+uint G1Policy::adjusted_max_eden_length(uint min_eden_length,
+                                        uint max_eden_length,
+                                        double target_pause_time_ms) const {
+  if (!UseImNotOkayGC || ImNotOkayBurstEdenClampPercent == 0) {
+    return max_eden_length;
+  }
+
+  const double trigger_ratio = (double)ImNotOkayBurstEdenClampTriggerPercent / 100.0;
+  const double min_copy_time_ms = predict_eden_copy_time_ms(min_eden_length, nullptr);
+  const double copy_time_ratio = target_pause_time_ms > 0.0 ? min_copy_time_ms / target_pause_time_ms : 0.0;
+  if (copy_time_ratio < trigger_ratio) {
+    return max_eden_length;
+  }
+
+  const double clamp_ratio = (double)ImNotOkayBurstEdenClampPercent / 100.0;
+  const uint clamped_max = MAX2(min_eden_length, (uint)MAX2(1.0, floor(max_eden_length * (1.0 - clamp_ratio))));
+
+  log_debug(gc, ergo, heap)(
+    "Applying ImNotOkay eden clamp. min eden copy time: %.2fms target pause: %.2fms max eden: %u clamped max eden: %u "
+    "trigger: %u%% clamp: %u%%",
+    min_copy_time_ms,
+    target_pause_time_ms,
+    max_eden_length,
+    clamped_max,
+    ImNotOkayBurstEdenClampTriggerPercent,
+    ImNotOkayBurstEdenClampPercent
+  );
+
+  return clamped_max;
+}
+
+uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
+                                         uint absolute_max_young_length) const {
+  if (!UseImNotOkayGC || ImNotOkayMaxYoungPercent == 0) {
+    return absolute_max_young_length;
+  }
+
+  const uint max_imnotokay_young_length = MAX2(absolute_min_young_length,
+                                               (uint)MAX2(1.0, floor(((double)_g1h->max_regions() * (double)ImNotOkayMaxYoungPercent) / 100.0)));
+  const uint adjusted_max = MIN2(absolute_max_young_length, max_imnotokay_young_length);
+
+  if (adjusted_max != absolute_max_young_length) {
+    log_debug(gc, ergo, heap)(
+      "Applying ImNotOkay young guardrail. absolute max young: %u adjusted max young: %u cap: %u%% of %u regions",
+      absolute_max_young_length,
+      adjusted_max,
+      ImNotOkayMaxYoungPercent,
+      _g1h->max_regions()
+    );
+  }
+
+  return adjusted_max;
+}
+
 uint G1Policy::calculate_desired_eden_length_before_young_only(double base_time_ms,
                                                                uint min_eden_length,
                                                                uint max_eden_length) const {
@@ -422,9 +506,12 @@ uint G1Policy::calculate_desired_eden_length_before_young_only(double base_time_
   // Here, we will make sure that the shortest young length that
   // makes sense fits within the target pause time.
 
+  const double target_pause_time_ms = adjusted_target_pause_time_ms(base_time_ms);
+  max_eden_length = adjusted_max_eden_length(min_eden_length, max_eden_length, target_pause_time_ms);
+
   G1YoungLengthPredictor p(base_time_ms,
                            _free_regions_at_end_of_collection,
-                           _mmu_tracker->max_gc_time() * 1000.0,
+                           target_pause_time_ms,
                            this);
   if (p.will_fit(min_eden_length)) {
     // The shortest young length will fit into the target pause time;

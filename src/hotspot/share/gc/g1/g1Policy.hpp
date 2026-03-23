@@ -226,6 +226,21 @@ private:
                                               uint min_eden_length,
                                               uint max_eden_length) const;
 
+  // Tighten the pause target under ImNotOkay when non-eden work already
+  // consumes too much of the available pause budget.
+  double adjusted_target_pause_time_ms(double base_time_ms) const;
+
+  // Under ImNotOkay, cap eden growth when predicted copy pressure already
+  // consumes a large part of the pause target.
+  uint adjusted_max_eden_length(uint min_eden_length,
+                                uint max_eden_length,
+                                double target_pause_time_ms) const;
+
+  // Under ImNotOkay, cap the young generation to a bounded fraction of the
+  // heap to avoid trading pause wins for runaway memory growth.
+  uint adjusted_max_young_length(uint absolute_min_young_length,
+                                 uint absolute_max_young_length) const;
+
   // Calculate the desired eden length that can fit into the pause time
   // goal before young only gcs.
   uint calculate_desired_eden_length_before_young_only(double base_time_ms,
