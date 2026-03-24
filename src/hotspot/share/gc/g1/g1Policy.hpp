@@ -230,10 +230,18 @@ private:
   // consumes too much of the available pause budget.
   double adjusted_target_pause_time_ms(double base_time_ms) const;
 
+  // Convert the configured eden clamp into an effective clamp that is strong
+  // for short evacuation bursts and decays again once the workload shifts into
+  // sustained non-eden pressure or the burst pressure recovers.
+  double imnotokay_effective_burst_clamp_ratio(double base_time_ms,
+                                               double target_pause_time_ms,
+                                               double min_copy_time_ms) const;
+
   // Under ImNotOkay, cap eden growth when predicted copy pressure already
   // consumes a large part of the pause target.
   uint adjusted_max_eden_length(uint min_eden_length,
                                 uint max_eden_length,
+                                double base_time_ms,
                                 double target_pause_time_ms) const;
 
   // Under ImNotOkay, cap the young generation to a bounded fraction of the

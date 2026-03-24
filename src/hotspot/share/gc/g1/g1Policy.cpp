@@ -442,32 +442,77 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
   return adjusted_target;
 }
 
+double G1Policy::imnotokay_effective_burst_clamp_ratio(double base_time_ms,
+                                                       double target_pause_time_ms,
+                                                       double min_copy_time_ms) const {
+  if (!UseImNotOkayGC || ImNotOkayBurstEdenClampPercent == 0) {
+    return 0.0;
+  }
+
+  const double trigger_ratio = (double)ImNotOkayBurstEdenClampTriggerPercent / 100.0;
+  const double copy_time_ratio = target_pause_time_ms > 0.0 ? min_copy_time_ms / target_pause_time_ms : 0.0;
+  if (copy_time_ratio < trigger_ratio) {
+    return 0.0;
+  }
+
+  const double configured_clamp_ratio = (double)ImNotOkayBurstEdenClampPercent / 100.0;
+  const double burst_window = MAX2(1.0 - trigger_ratio, 0.0001);
+  const double burst_severity = MIN2(MAX2((copy_time_ratio - trigger_ratio) / burst_window, 0.0), 1.0);
+
+  // Keep some clamp once the trigger has fired, but allow eden to recover as
+  // the burst pressure falls back toward the trigger threshold.
+  double effective_ratio = configured_clamp_ratio * (0.35 + (0.65 * burst_severity));
+
+  // If non-eden work already dominates the pause budget, we are no longer in a
+  // short evacuation burst. Decay the clamp so sustained heavy-build phases do
+  // not get stuck with undersized young generations.
+  const double sustained_threshold_ratio = (double)ImNotOkayBurstSustainedPressurePercent / 100.0;
+  const double base_time_ratio = target_pause_time_ms > 0.0 ? base_time_ms / target_pause_time_ms : 0.0;
+  if (base_time_ratio > sustained_threshold_ratio) {
+    const double sustained_window = MAX2(1.0 - sustained_threshold_ratio, 0.0001);
+    const double sustained_severity = MIN2(MAX2((base_time_ratio - sustained_threshold_ratio) / sustained_window, 0.0), 1.0);
+    effective_ratio *= (1.0 - (0.75 * sustained_severity));
+  }
+
+  return MIN2(MAX2(effective_ratio, 0.0), configured_clamp_ratio);
+}
+
 uint G1Policy::adjusted_max_eden_length(uint min_eden_length,
                                         uint max_eden_length,
+                                        double base_time_ms,
                                         double target_pause_time_ms) const {
   if (!UseImNotOkayGC || ImNotOkayBurstEdenClampPercent == 0) {
     return max_eden_length;
   }
 
-  const double trigger_ratio = (double)ImNotOkayBurstEdenClampTriggerPercent / 100.0;
   const double min_copy_time_ms = predict_eden_copy_time_ms(min_eden_length, nullptr);
-  const double copy_time_ratio = target_pause_time_ms > 0.0 ? min_copy_time_ms / target_pause_time_ms : 0.0;
-  if (copy_time_ratio < trigger_ratio) {
+  const double effective_clamp_ratio = imnotokay_effective_burst_clamp_ratio(base_time_ms,
+                                                                              target_pause_time_ms,
+                                                                              min_copy_time_ms);
+  if (effective_clamp_ratio <= 0.0) {
     return max_eden_length;
   }
 
-  const double clamp_ratio = (double)ImNotOkayBurstEdenClampPercent / 100.0;
-  const uint clamped_max = MAX2(min_eden_length, (uint)MAX2(1.0, floor(max_eden_length * (1.0 - clamp_ratio))));
+  const double base_time_ratio = target_pause_time_ms > 0.0 ? base_time_ms / target_pause_time_ms : 0.0;
+  const double copy_time_ratio = target_pause_time_ms > 0.0 ? min_copy_time_ms / target_pause_time_ms : 0.0;
+  const uint clamped_max = MAX2(min_eden_length,
+                                (uint)MAX2(1.0, floor(max_eden_length * (1.0 - effective_clamp_ratio))));
 
   log_debug(gc, ergo, heap)(
-    "Applying ImNotOkay eden clamp. min eden copy time: %.2fms target pause: %.2fms max eden: %u clamped max eden: %u "
-    "trigger: %u%% clamp: %u%%",
+    "Applying ImNotOkay eden clamp. base time: %.2fms base ratio: %.3f min eden copy time: %.2fms copy ratio: %.3f "
+    "target pause: %.2fms max eden: %u clamped max eden: %u trigger: %u%% configured clamp: %u%% effective clamp: %.1f%% "
+    "sustained threshold: %u%%",
+    base_time_ms,
+    base_time_ratio,
     min_copy_time_ms,
+    copy_time_ratio,
     target_pause_time_ms,
     max_eden_length,
     clamped_max,
     ImNotOkayBurstEdenClampTriggerPercent,
-    ImNotOkayBurstEdenClampPercent
+    ImNotOkayBurstEdenClampPercent,
+    effective_clamp_ratio * 100.0,
+    ImNotOkayBurstSustainedPressurePercent
   );
 
   return clamped_max;
@@ -507,7 +552,7 @@ uint G1Policy::calculate_desired_eden_length_before_young_only(double base_time_
   // makes sense fits within the target pause time.
 
   const double target_pause_time_ms = adjusted_target_pause_time_ms(base_time_ms);
-  max_eden_length = adjusted_max_eden_length(min_eden_length, max_eden_length, target_pause_time_ms);
+  max_eden_length = adjusted_max_eden_length(min_eden_length, max_eden_length, base_time_ms, target_pause_time_ms);
 
   G1YoungLengthPredictor p(base_time_ms,
                            _free_regions_at_end_of_collection,

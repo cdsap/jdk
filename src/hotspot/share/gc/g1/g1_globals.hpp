@@ -141,6 +141,12 @@
           "target.")                                                        \
           range(1, 100)                                                     \
                                                                             \
+  product(uint, ImNotOkayBurstSustainedPressurePercent, 85, EXPERIMENTAL,   \
+          "When predicted non-eden pause work already exceeds this "        \
+          "percentage of the pause budget, decay the ImNotOkay eden clamp " \
+          "so sustained heavy-build phases can recover throughput.")        \
+          range(1, 100)                                                     \
+                                                                            \
   product(uint, ImNotOkayMaxYoungPercent, 45, EXPERIMENTAL,                 \
           "Maximum percentage of heap regions ImNotOkay will target for "   \
           "the young generation. This provides a memory guardrail against " \

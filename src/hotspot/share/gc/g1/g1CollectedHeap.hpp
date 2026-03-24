@@ -899,7 +899,7 @@ public:
   }
 
   const char* name() const override {
-    return "G1";
+    return UseImNotOkayGC ? "ImNotOkay" : "G1";
   }
 
   const G1CollectorState* collector_state() const { return &_collector_state; }
