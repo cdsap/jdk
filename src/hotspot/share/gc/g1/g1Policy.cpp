@@ -72,6 +72,7 @@ G1Policy::G1Policy(STWGCTimer* gc_timer) :
   _card_rs_length(0),
   _pending_cards_at_gc_start(0),
   _concurrent_start_to_mixed(),
+  _imnotokay_recent_gc_to_app_time_ratio_seq(10),
   _collection_set(nullptr),
   _g1h(nullptr),
   _phase_times_timer(gc_timer),
@@ -437,6 +438,23 @@ double G1Policy::imnotokay_sustained_pressure_severity(double base_time_ms,
   return MIN2(MAX2((base_time_ratio - threshold_ratio) / sustained_window, 0.0), 1.0);
 }
 
+double G1Policy::imnotokay_recent_gc_to_app_time_severity() const {
+  if (!UseImNotOkayGC ||
+      ImNotOkayThroughputBackoffPercent == 0 ||
+      _imnotokay_recent_gc_to_app_time_ratio_seq.num() == 0) {
+    return 0.0;
+  }
+
+  const double trigger_ratio = (double)ImNotOkayGcToAppTimeTriggerPercent / 100.0;
+  const double recent_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.avg();
+  if (recent_ratio <= trigger_ratio) {
+    return 0.0;
+  }
+
+  const double recovery_window = MAX2(1.0 - trigger_ratio, 0.0001);
+  return MIN2(MAX2((recent_ratio - trigger_ratio) / recovery_window, 0.0), 1.0);
+}
+
 double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
   const double target_pause_time_ms = _mmu_tracker->max_gc_time() * 1000.0;
 
@@ -452,11 +470,13 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
 
   const double headroom_ratio = (double)ImNotOkayPauseHeadroomPercent / 100.0;
   double effective_headroom_ratio = headroom_ratio;
-  const double sustained_severity = imnotokay_sustained_pressure_severity(base_time_ms,
-                                                                           target_pause_time_ms,
-                                                                           ImNotOkayThroughputBackoffTriggerPercent);
-  if (sustained_severity > 0.0 && ImNotOkayThroughputBackoffPercent > 0) {
-    const double recovery_ratio = ((double)ImNotOkayThroughputBackoffPercent / 100.0) * sustained_severity;
+  const double predicted_sustained_severity = imnotokay_sustained_pressure_severity(base_time_ms,
+                                                                                     target_pause_time_ms,
+                                                                                     ImNotOkayThroughputBackoffTriggerPercent);
+  const double observed_gc_to_app_severity = imnotokay_recent_gc_to_app_time_severity();
+  const double throughput_severity = MAX2(predicted_sustained_severity, observed_gc_to_app_severity);
+  if (throughput_severity > 0.0 && ImNotOkayThroughputBackoffPercent > 0) {
+    const double recovery_ratio = ((double)ImNotOkayThroughputBackoffPercent / 100.0) * throughput_severity;
     effective_headroom_ratio *= (1.0 - recovery_ratio);
   }
 
@@ -464,7 +484,8 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
 
   log_debug(gc, ergo, heap)(
     "Applying ImNotOkay pause headroom. base time: %.2fms target pause: %.2fms adjusted target: %.2fms "
-    "trigger: %u%% configured headroom: %u%% effective headroom: %.1f%% throughput trigger: %u%% throughput backoff: %u%%",
+    "trigger: %u%% configured headroom: %u%% effective headroom: %.1f%% throughput trigger: %u%% "
+    "throughput backoff: %u%% predicted throughput severity: %.3f observed gc/app severity: %.3f gc/app trigger: %u%%",
     base_time_ms,
     target_pause_time_ms,
     adjusted_target,
@@ -472,7 +493,10 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
     ImNotOkayPauseHeadroomPercent,
     effective_headroom_ratio * 100.0,
     ImNotOkayThroughputBackoffTriggerPercent,
-    ImNotOkayThroughputBackoffPercent
+    ImNotOkayThroughputBackoffPercent,
+    predicted_sustained_severity,
+    observed_gc_to_app_severity,
+    ImNotOkayGcToAppTimeTriggerPercent
   );
 
   return adjusted_target;
@@ -566,11 +590,13 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
                                                (uint)MAX2(1.0, floor(((double)_g1h->max_regions() * (double)ImNotOkayMaxYoungPercent) / 100.0)));
   uint adjusted_max = MIN2(absolute_max_young_length, max_imnotokay_young_length);
 
-  const double sustained_severity = imnotokay_sustained_pressure_severity(base_time_ms,
-                                                                           target_pause_time_ms,
-                                                                           ImNotOkayThroughputBackoffTriggerPercent);
-  if (sustained_severity > 0.0 && adjusted_max < absolute_max_young_length && ImNotOkayThroughputBackoffPercent > 0) {
-    const double recovery_ratio = ((double)ImNotOkayThroughputBackoffPercent / 100.0) * sustained_severity;
+  const double predicted_sustained_severity = imnotokay_sustained_pressure_severity(base_time_ms,
+                                                                                     target_pause_time_ms,
+                                                                                     ImNotOkayThroughputBackoffTriggerPercent);
+  const double observed_gc_to_app_severity = imnotokay_recent_gc_to_app_time_severity();
+  const double throughput_severity = MAX2(predicted_sustained_severity, observed_gc_to_app_severity);
+  if (throughput_severity > 0.0 && adjusted_max < absolute_max_young_length && ImNotOkayThroughputBackoffPercent > 0) {
+    const double recovery_ratio = ((double)ImNotOkayThroughputBackoffPercent / 100.0) * throughput_severity;
     const double recovered_gap = (double)(absolute_max_young_length - adjusted_max) * recovery_ratio;
     adjusted_max = MIN2(absolute_max_young_length,
                         adjusted_max + (uint)MAX2(1.0, ceil(recovered_gap)));
@@ -579,13 +605,17 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
   if (adjusted_max != absolute_max_young_length) {
     log_debug(gc, ergo, heap)(
       "Applying ImNotOkay young guardrail. absolute max young: %u adjusted max young: %u cap: %u%% of %u regions "
-      "throughput trigger: %u%% throughput backoff: %u%%",
+      "throughput trigger: %u%% throughput backoff: %u%% predicted throughput severity: %.3f "
+      "observed gc/app severity: %.3f gc/app trigger: %u%%",
       absolute_max_young_length,
       adjusted_max,
       ImNotOkayMaxYoungPercent,
       _g1h->max_regions(),
       ImNotOkayThroughputBackoffTriggerPercent,
-      ImNotOkayThroughputBackoffPercent
+      ImNotOkayThroughputBackoffPercent,
+      predicted_sustained_severity,
+      observed_gc_to_app_severity,
+      ImNotOkayGcToAppTimeTriggerPercent
     );
   }
 
@@ -1000,6 +1030,11 @@ void G1Policy::record_young_collection_end(bool concurrent_operation_is_full_mar
     // granularity. Some Linuxes are the usual culprits.
     // We'll just set it to something (arbitrarily) small.
     app_time_ms = 1.0;
+  }
+
+  if (UseImNotOkayGC) {
+    const double gc_to_app_ratio = pause_time_ms / MAX2(app_time_ms, 1.0);
+    _imnotokay_recent_gc_to_app_time_ratio_seq.add(gc_to_app_ratio);
   }
 
   // Evacuation failures skew the timing too much to be considered for some statistics updates.

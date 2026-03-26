@@ -36,6 +36,7 @@
 #include "gc/g1/g1YoungGenSizer.hpp"
 #include "gc/shared/gcCause.hpp"
 #include "runtime/atomic.hpp"
+#include "utilities/numberSeq.hpp"
 #include "utilities/pair.hpp"
 #include "utilities/ticks.hpp"
 
@@ -108,6 +109,7 @@ class G1Policy: public CHeapObj<mtGC> {
   size_t _pending_cards_at_gc_start;
 
   G1ConcurrentStartToMixedTimeTracker _concurrent_start_to_mixed;
+  TruncatedSeq _imnotokay_recent_gc_to_app_time_ratio_seq;
 
   bool should_update_surv_rate_group_predictors() {
     return collector_state()->in_young_only_phase() && !collector_state()->mark_or_rebuild_in_progress();
@@ -235,6 +237,10 @@ private:
   double imnotokay_sustained_pressure_severity(double base_time_ms,
                                                double target_pause_time_ms,
                                                uint threshold_percent) const;
+
+  // Convert recent observed GC-time-per-application-time into a 0..1 severity
+  // score once the collector starts taking too much of the recent mutator time.
+  double imnotokay_recent_gc_to_app_time_severity() const;
 
   // Convert the configured eden clamp into an effective clamp that is strong
   // for short evacuation bursts and decays again once the workload shifts into
