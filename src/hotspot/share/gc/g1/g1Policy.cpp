@@ -234,6 +234,11 @@ void G1Policy::update_young_length_bounds(size_t pending_cards, size_t card_rs_l
 uint G1Policy::calculate_young_desired_length(size_t pending_cards,
                                               size_t card_rs_length,
                                               size_t code_root_rs_length) const {
+  double base_time_ms = 0.0;
+  double retained_time_ms = 0.0;
+  double total_time_ms = 0.0;
+  const double target_pause_time_ms = _mmu_tracker->max_gc_time() * 1000.0;
+
   uint min_young_length_by_sizer = _young_gen_sizer.min_desired_young_length();
   uint max_young_length_by_sizer = _young_gen_sizer.max_desired_young_length();
 
@@ -258,18 +263,20 @@ uint G1Policy::calculate_young_desired_length(size_t pending_cards,
   // young length we might have exceeded absolute min length or absolute_max_length,
   // so adjust the result accordingly.
   uint absolute_max_young_length = MAX2(max_young_length_by_sizer, absolute_min_young_length);
-  absolute_max_young_length = adjusted_max_young_length(absolute_min_young_length, absolute_max_young_length);
 
   uint desired_eden_length_by_mmu = 0;
   uint desired_eden_length_by_pause = 0;
 
   uint desired_young_length = 0;
   if (use_adaptive_young_list_length()) {
+    base_time_ms = predict_base_time_ms(pending_cards, card_rs_length, code_root_rs_length);
+    retained_time_ms = predict_retained_regions_evac_time();
+    total_time_ms = base_time_ms + retained_time_ms;
+    absolute_max_young_length = adjusted_max_young_length(absolute_min_young_length,
+                                                          absolute_max_young_length,
+                                                          total_time_ms,
+                                                          target_pause_time_ms);
     desired_eden_length_by_mmu = calculate_desired_eden_length_by_mmu();
-
-    double base_time_ms = predict_base_time_ms(pending_cards, card_rs_length, code_root_rs_length);
-    double retained_time_ms = predict_retained_regions_evac_time();
-    double total_time_ms = base_time_ms + retained_time_ms;
 
     log_trace(gc, ergo, heap)("Predicted total base time: total %f base_time %f retained_time %f",
                               total_time_ms, base_time_ms, retained_time_ms);
@@ -413,6 +420,23 @@ uint G1Policy::calculate_desired_eden_length_by_pause(double base_time_ms,
   }
 }
 
+double G1Policy::imnotokay_sustained_pressure_severity(double base_time_ms,
+                                                       double target_pause_time_ms,
+                                                       uint threshold_percent) const {
+  if (target_pause_time_ms <= 0.0) {
+    return 0.0;
+  }
+
+  const double threshold_ratio = (double)threshold_percent / 100.0;
+  const double base_time_ratio = base_time_ms / target_pause_time_ms;
+  if (base_time_ratio <= threshold_ratio) {
+    return 0.0;
+  }
+
+  const double sustained_window = MAX2(1.0 - threshold_ratio, 0.0001);
+  return MIN2(MAX2((base_time_ratio - threshold_ratio) / sustained_window, 0.0), 1.0);
+}
+
 double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
   const double target_pause_time_ms = _mmu_tracker->max_gc_time() * 1000.0;
 
@@ -427,16 +451,28 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
   }
 
   const double headroom_ratio = (double)ImNotOkayPauseHeadroomPercent / 100.0;
-  const double adjusted_target = MAX2(target_pause_time_ms * (1.0 - headroom_ratio), 1.0);
+  double effective_headroom_ratio = headroom_ratio;
+  const double sustained_severity = imnotokay_sustained_pressure_severity(base_time_ms,
+                                                                           target_pause_time_ms,
+                                                                           ImNotOkayThroughputBackoffTriggerPercent);
+  if (sustained_severity > 0.0 && ImNotOkayThroughputBackoffPercent > 0) {
+    const double recovery_ratio = ((double)ImNotOkayThroughputBackoffPercent / 100.0) * sustained_severity;
+    effective_headroom_ratio *= (1.0 - recovery_ratio);
+  }
+
+  const double adjusted_target = MAX2(target_pause_time_ms * (1.0 - effective_headroom_ratio), 1.0);
 
   log_debug(gc, ergo, heap)(
     "Applying ImNotOkay pause headroom. base time: %.2fms target pause: %.2fms adjusted target: %.2fms "
-    "trigger: %u%% headroom: %u%%",
+    "trigger: %u%% configured headroom: %u%% effective headroom: %.1f%% throughput trigger: %u%% throughput backoff: %u%%",
     base_time_ms,
     target_pause_time_ms,
     adjusted_target,
     ImNotOkayPauseHeadroomTriggerPercent,
-    ImNotOkayPauseHeadroomPercent
+    ImNotOkayPauseHeadroomPercent,
+    effective_headroom_ratio * 100.0,
+    ImNotOkayThroughputBackoffTriggerPercent,
+    ImNotOkayThroughputBackoffPercent
   );
 
   return adjusted_target;
@@ -519,22 +555,37 @@ uint G1Policy::adjusted_max_eden_length(uint min_eden_length,
 }
 
 uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
-                                         uint absolute_max_young_length) const {
+                                         uint absolute_max_young_length,
+                                         double base_time_ms,
+                                         double target_pause_time_ms) const {
   if (!UseImNotOkayGC || ImNotOkayMaxYoungPercent == 0) {
     return absolute_max_young_length;
   }
 
   const uint max_imnotokay_young_length = MAX2(absolute_min_young_length,
                                                (uint)MAX2(1.0, floor(((double)_g1h->max_regions() * (double)ImNotOkayMaxYoungPercent) / 100.0)));
-  const uint adjusted_max = MIN2(absolute_max_young_length, max_imnotokay_young_length);
+  uint adjusted_max = MIN2(absolute_max_young_length, max_imnotokay_young_length);
+
+  const double sustained_severity = imnotokay_sustained_pressure_severity(base_time_ms,
+                                                                           target_pause_time_ms,
+                                                                           ImNotOkayThroughputBackoffTriggerPercent);
+  if (sustained_severity > 0.0 && adjusted_max < absolute_max_young_length && ImNotOkayThroughputBackoffPercent > 0) {
+    const double recovery_ratio = ((double)ImNotOkayThroughputBackoffPercent / 100.0) * sustained_severity;
+    const double recovered_gap = (double)(absolute_max_young_length - adjusted_max) * recovery_ratio;
+    adjusted_max = MIN2(absolute_max_young_length,
+                        adjusted_max + (uint)MAX2(1.0, ceil(recovered_gap)));
+  }
 
   if (adjusted_max != absolute_max_young_length) {
     log_debug(gc, ergo, heap)(
-      "Applying ImNotOkay young guardrail. absolute max young: %u adjusted max young: %u cap: %u%% of %u regions",
+      "Applying ImNotOkay young guardrail. absolute max young: %u adjusted max young: %u cap: %u%% of %u regions "
+      "throughput trigger: %u%% throughput backoff: %u%%",
       absolute_max_young_length,
       adjusted_max,
       ImNotOkayMaxYoungPercent,
-      _g1h->max_regions()
+      _g1h->max_regions(),
+      ImNotOkayThroughputBackoffTriggerPercent,
+      ImNotOkayThroughputBackoffPercent
     );
   }
 
