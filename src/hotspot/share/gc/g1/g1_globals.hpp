@@ -167,7 +167,7 @@
           "during long heavy-build phases.")                                 \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayMaxYoungPercent, 100, EXPERIMENTAL,                 \
+  product(uint, ImNotOkayMaxYoungPercent, 98, EXPERIMENTAL,                 \
           "Maximum percentage of heap regions ImNotOkay will target for "   \
           "the young generation. This provides a memory guardrail against " \
           "solving pause issues with unbounded young growth.")              \
