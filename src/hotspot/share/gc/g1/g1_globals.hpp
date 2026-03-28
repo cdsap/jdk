@@ -147,7 +147,7 @@
           "so sustained heavy-build phases can recover throughput.")        \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayThroughputBackoffTriggerPercent, 50, EXPERIMENTAL, \
+  product(uint, ImNotOkayThroughputBackoffTriggerPercent, 1, EXPERIMENTAL, \
           "When predicted non-eden pause work already exceeds this "        \
           "percentage of the pause budget, begin relaxing ImNotOkay pause " \
           "headroom and young-size guardrails so long heavy-build phases "  \
@@ -160,14 +160,14 @@
           "pressure.")                                                      \
           range(0, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayGcToAppTimeTriggerPercent, 8, EXPERIMENTAL,        \
+  product(uint, ImNotOkayGcToAppTimeTriggerPercent, 1, EXPERIMENTAL,        \
           "When recent ImNotOkay GC pause time reaches at least this "      \
           "percentage of recent application time, begin relaxing pause "     \
           "headroom and young-size guardrails to avoid over-collecting "     \
           "during long heavy-build phases.")                                 \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayMaxYoungPercent, 80, EXPERIMENTAL,                 \
+  product(uint, ImNotOkayMaxYoungPercent, 100, EXPERIMENTAL,                 \
           "Maximum percentage of heap regions ImNotOkay will target for "   \
           "the young generation. This provides a memory guardrail against " \
           "solving pause issues with unbounded young growth.")              \
