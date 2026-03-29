@@ -36,7 +36,6 @@
 #include "gc/shared/cardTable.hpp"
 #include "gc/shared/gcArguments.hpp"
 #include "gc/shared/workerPolicy.hpp"
-#include "runtime/flags/jvmFlagAccess.hpp"
 #include "runtime/globals.hpp"
 #include "runtime/globals_extension.hpp"
 #include "runtime/java.hpp"
@@ -118,25 +117,6 @@ void G1Arguments::parse_verification_type(const char* type) {
 // phase.
 static uint scale_concurrent_worker_threads(uint num_gc_workers) {
   return MAX2((num_gc_workers + 2) / 4, 1U);
-}
-
-static void maybe_apply_imnotokay_young_gen_ergonomics() {
-  JVMFlag* imnotokay_flag = JVMFlag::find_declared_flag("UseImNotOkayGC");
-  if (imnotokay_flag == nullptr || !imnotokay_flag->is_bool() || !imnotokay_flag->get_bool()) {
-    return;
-  }
-
-  JVMFlag* min_young_flag = JVMFlag::find_declared_flag("G1NewSizePercent");
-  if (min_young_flag != nullptr && min_young_flag->is_default()) {
-    uint min_young_percent = 10;
-    JVMFlagAccess::set_uint(min_young_flag, &min_young_percent, JVMFlagOrigin::ERGONOMIC);
-  }
-
-  JVMFlag* max_young_flag = JVMFlag::find_declared_flag("G1MaxNewSizePercent");
-  if (max_young_flag != nullptr && max_young_flag->is_default()) {
-    uint max_young_percent = 70;
-    JVMFlagAccess::set_uint(max_young_flag, &max_young_percent, JVMFlagOrigin::ERGONOMIC);
-  }
 }
 
 void G1Arguments::initialize_mark_stack_size() {
@@ -254,8 +234,6 @@ void G1Arguments::initialize() {
     }
   }
 #endif
-
-  maybe_apply_imnotokay_young_gen_ergonomics();
 
   initialize_mark_stack_size();
   initialize_verification_types();
