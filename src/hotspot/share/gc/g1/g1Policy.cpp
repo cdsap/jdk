@@ -637,7 +637,7 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
                                                                                      ImNotOkayThroughputBackoffTriggerPercent);
   const double observed_gc_to_app_severity = imnotokay_recent_gc_to_app_time_severity();
   const double throughput_severity = MAX2(predicted_sustained_severity, observed_gc_to_app_severity);
-  if (throughput_severity >= 1.0) {
+  if (throughput_severity >= 0.0) {
     return absolute_max_young_length;
   }
 

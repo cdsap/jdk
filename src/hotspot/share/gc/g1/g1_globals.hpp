@@ -114,7 +114,7 @@
           "Confidence level for MMU/pause predictions")                     \
           range(0, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayPauseHeadroomPercent, 8, EXPERIMENTAL,             \
+  product(uint, ImNotOkayPauseHeadroomPercent, 0, EXPERIMENTAL,             \
           "When UseImNotOkayGC is enabled and the predicted non-eden "      \
           "pause cost is already high, reserve this percentage of the "     \
           "pause budget before sizing eden. This biases G1 internals "      \
@@ -135,20 +135,20 @@
           "already active.")                                                \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayPauseHeadroomTriggerPercent, 70, EXPERIMENTAL,     \
+  product(uint, ImNotOkayPauseHeadroomTriggerPercent, 95, EXPERIMENTAL,     \
           "Activate ImNotOkayPauseHeadroomPercent only when the predicted " \
           "non-eden pause cost reaches at least this percentage of the "    \
           "pause target.")                                                  \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayBurstEdenClampPercent, 10, EXPERIMENTAL,          \
+  product(uint, ImNotOkayBurstEdenClampPercent, 0, EXPERIMENTAL,          \
           "When UseImNotOkayGC is enabled and predicted eden evacuation "   \
           "copy time is already consuming a large fraction of the pause "   \
           "budget, reduce the maximum eden growth considered during "       \
           "young sizing by this percentage.")                               \
           range(0, 50)                                                      \
                                                                             \
-  product(uint, ImNotOkayBurstEdenClampTriggerPercent, 55, EXPERIMENTAL,    \
+  product(uint, ImNotOkayBurstEdenClampTriggerPercent, 95, EXPERIMENTAL,    \
           "Activate ImNotOkayBurstEdenClampPercent only when predicted "    \
           "eden copy time reaches at least this percentage of the pause "   \
           "target.")                                                        \
@@ -160,7 +160,7 @@
           "so sustained heavy-build phases can recover throughput.")        \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayThroughputBackoffTriggerPercent, 70, EXPERIMENTAL, \
+  product(uint, ImNotOkayThroughputBackoffTriggerPercent, 1, EXPERIMENTAL, \
           "When predicted non-eden pause work already exceeds this "        \
           "percentage of the pause budget, begin relaxing ImNotOkay pause " \
           "headroom and young-size guardrails so long heavy-build phases "  \
@@ -173,7 +173,7 @@
           "pressure.")                                                      \
           range(0, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayGcToAppTimeTriggerPercent, 20, EXPERIMENTAL,       \
+  product(uint, ImNotOkayGcToAppTimeTriggerPercent, 1, EXPERIMENTAL,       \
           "When recent ImNotOkay GC pause time reaches at least this "      \
           "percentage of recent application time, begin relaxing pause "     \
           "headroom and young-size guardrails to avoid over-collecting "     \
