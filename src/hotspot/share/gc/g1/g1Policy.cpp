@@ -471,18 +471,28 @@ bool G1Policy::imnotokay_has_real_memory_pressure() const {
     return false;
   }
 
+  const bool late_cycle_pressure =
+    collector_state()->mark_or_rebuild_in_progress() ||
+    !collector_state()->in_young_only_phase() ||
+    _g1h->has_humongous_reclaim_candidates();
+  if (late_cycle_pressure) {
+    return true;
+  }
+
   const uint max_regions = MAX2(_g1h->max_regions(), 1u);
   const uint non_young_regions = _g1h->old_regions_count() + _g1h->humongous_regions_count();
   const double non_young_percent = ((double)non_young_regions * 100.0) / (double)max_regions;
+  if (non_young_percent < (double)ImNotOkayExecutionPressurePercent) {
+    return false;
+  }
 
-  const bool occupancy_pressure = non_young_percent >= (double)ImNotOkayExecutionPressurePercent;
-  const bool cycle_pressure =
-    collector_state()->mark_or_rebuild_in_progress() ||
-    collector_state()->in_young_gc_before_mixed() ||
-    !collector_state()->in_young_only_phase() ||
-    _g1h->has_humongous_reclaim_candidates();
+  if (_imnotokay_recent_gc_to_app_time_ratio_seq.num() == 0) {
+    return false;
+  }
 
-  return occupancy_pressure || cycle_pressure;
+  const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.avg();
+  const double activation_ratio = (double)ImNotOkayExecutionGcToAppActivationPercent / 100.0;
+  return recent_gc_to_app_ratio >= activation_ratio;
 }
 
 bool G1Policy::imnotokay_policy_active() const {
@@ -637,7 +647,7 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
                                                                                      ImNotOkayThroughputBackoffTriggerPercent);
   const double observed_gc_to_app_severity = imnotokay_recent_gc_to_app_time_severity();
   const double throughput_severity = MAX2(predicted_sustained_severity, observed_gc_to_app_severity);
-  if (throughput_severity >= 0.0) {
+  if (throughput_severity >= 0.5) {
     return absolute_max_young_length;
   }
 

@@ -114,7 +114,7 @@
           "Confidence level for MMU/pause predictions")                     \
           range(0, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayPauseHeadroomPercent, 0, EXPERIMENTAL,             \
+  product(uint, ImNotOkayPauseHeadroomPercent, 5, EXPERIMENTAL,             \
           "When UseImNotOkayGC is enabled and the predicted non-eden "      \
           "pause cost is already high, reserve this percentage of the "     \
           "pause budget before sizing eden. This biases G1 internals "      \
@@ -122,33 +122,39 @@
           "on pressure-heavy Android build heaps.")                         \
           range(0, 50)                                                      \
                                                                             \
-  product(uint, ImNotOkayConfigurationGracePeriodSeconds, 45, EXPERIMENTAL, \
+  product(uint, ImNotOkayConfigurationGracePeriodSeconds, 60, EXPERIMENTAL, \
           "For the first N seconds after startup, keep ImNotOkay sizing "   \
           "adjustments disabled so short Android configuration phases can "  \
           "run with maximum throughput.")                                    \
           range(0, 600)                                                     \
                                                                             \
-  product(uint, ImNotOkayExecutionPressurePercent, 55, EXPERIMENTAL,        \
+  product(uint, ImNotOkayExecutionPressurePercent, 70, EXPERIMENTAL,        \
           "Outside the startup grace period, only activate ImNotOkay "      \
           "sizing adjustments once non-young regions consume at least this " \
-          "percentage of the heap, or once mixed/marking pressure is "      \
-          "already active.")                                                \
+          "percentage of the heap and GC is measurably eating into "        \
+          "mutator time, or once mixed/marking pressure is already active.") \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayPauseHeadroomTriggerPercent, 95, EXPERIMENTAL,     \
+  product(uint, ImNotOkayExecutionGcToAppActivationPercent, 12, EXPERIMENTAL, \
+          "Outside the startup grace period, only treat plain old-region "  \
+          "occupancy as real execution pressure once recent GC time reaches " \
+          "at least this percentage of recent application time.")           \
+          range(1, 100)                                                     \
+                                                                            \
+  product(uint, ImNotOkayPauseHeadroomTriggerPercent, 98, EXPERIMENTAL,     \
           "Activate ImNotOkayPauseHeadroomPercent only when the predicted " \
           "non-eden pause cost reaches at least this percentage of the "    \
           "pause target.")                                                  \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayBurstEdenClampPercent, 0, EXPERIMENTAL,          \
+  product(uint, ImNotOkayBurstEdenClampPercent, 8, EXPERIMENTAL,          \
           "When UseImNotOkayGC is enabled and predicted eden evacuation "   \
           "copy time is already consuming a large fraction of the pause "   \
           "budget, reduce the maximum eden growth considered during "       \
           "young sizing by this percentage.")                               \
           range(0, 50)                                                      \
                                                                             \
-  product(uint, ImNotOkayBurstEdenClampTriggerPercent, 95, EXPERIMENTAL,    \
+  product(uint, ImNotOkayBurstEdenClampTriggerPercent, 98, EXPERIMENTAL,    \
           "Activate ImNotOkayBurstEdenClampPercent only when predicted "    \
           "eden copy time reaches at least this percentage of the pause "   \
           "target.")                                                        \
@@ -160,7 +166,7 @@
           "so sustained heavy-build phases can recover throughput.")        \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayThroughputBackoffTriggerPercent, 1, EXPERIMENTAL, \
+  product(uint, ImNotOkayThroughputBackoffTriggerPercent, 50, EXPERIMENTAL, \
           "When predicted non-eden pause work already exceeds this "        \
           "percentage of the pause budget, begin relaxing ImNotOkay pause " \
           "headroom and young-size guardrails so long heavy-build phases "  \
@@ -173,14 +179,14 @@
           "pressure.")                                                      \
           range(0, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayGcToAppTimeTriggerPercent, 1, EXPERIMENTAL,       \
+  product(uint, ImNotOkayGcToAppTimeTriggerPercent, 12, EXPERIMENTAL,      \
           "When recent ImNotOkay GC pause time reaches at least this "      \
           "percentage of recent application time, begin relaxing pause "     \
           "headroom and young-size guardrails to avoid over-collecting "     \
           "during long heavy-build phases.")                                 \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayMaxYoungPercent, 70, EXPERIMENTAL,                \
+  product(uint, ImNotOkayMaxYoungPercent, 85, EXPERIMENTAL,                \
           "Maximum percentage of heap regions ImNotOkay will target for "   \
           "the young generation. This provides a memory guardrail against " \
           "solving pause issues with unbounded young growth.")              \

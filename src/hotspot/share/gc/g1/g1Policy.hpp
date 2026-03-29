@@ -238,9 +238,10 @@ private:
   // helps pauses. Keep ImNotOkay disabled during that startup window.
   bool imnotokay_configuration_grace_active() const;
 
-  // After the configuration window, only activate ImNotOkay sizing once old
-  // or humongous occupancy becomes meaningful, or once the collector is
-  // already transitioning into marking / mixed pressure handling.
+  // After the configuration window, only activate ImNotOkay sizing once the
+  // collector is already in marking / mixed pressure handling, or when old
+  // occupancy is high enough and recent GC time is measurably eating into
+  // mutator time.
   bool imnotokay_has_real_memory_pressure() const;
 
   // Combined phase gate for all ImNotOkay sizing heuristics.
