@@ -471,11 +471,21 @@ bool G1Policy::imnotokay_has_real_memory_pressure() const {
     return false;
   }
 
-  const bool late_cycle_pressure =
-    collector_state()->mark_or_rebuild_in_progress() ||
-    !collector_state()->in_young_only_phase() ||
-    _g1h->has_humongous_reclaim_candidates();
-  if (late_cycle_pressure) {
+  if (collector_state()->mark_or_rebuild_in_progress() ||
+      _g1h->has_humongous_reclaim_candidates()) {
+    return true;
+  }
+
+  if (_imnotokay_recent_gc_to_app_time_ratio_seq.num() == 0) {
+    return false;
+  }
+
+  const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.avg();
+  const double activation_ratio = (double)ImNotOkayExecutionGcToAppActivationPercent / 100.0;
+
+  const bool mixed_phase_pressure = !collector_state()->in_young_only_phase() &&
+                                    recent_gc_to_app_ratio >= activation_ratio;
+  if (mixed_phase_pressure) {
     return true;
   }
 
@@ -486,12 +496,6 @@ bool G1Policy::imnotokay_has_real_memory_pressure() const {
     return false;
   }
 
-  if (_imnotokay_recent_gc_to_app_time_ratio_seq.num() == 0) {
-    return false;
-  }
-
-  const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.avg();
-  const double activation_ratio = (double)ImNotOkayExecutionGcToAppActivationPercent / 100.0;
   return recent_gc_to_app_ratio >= activation_ratio;
 }
 
