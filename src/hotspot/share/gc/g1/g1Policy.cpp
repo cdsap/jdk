@@ -73,6 +73,7 @@ G1Policy::G1Policy(STWGCTimer* gc_timer) :
   _pending_cards_at_gc_start(0),
   _concurrent_start_to_mixed(),
   _imnotokay_recent_gc_to_app_time_ratio_seq(10),
+  _imnotokay_policy_start_sec(0.0),
   _collection_set(nullptr),
   _g1h(nullptr),
   _phase_times_timer(gc_timer),
@@ -94,6 +95,7 @@ G1CollectorState* G1Policy::collector_state() const { return _g1h->collector_sta
 void G1Policy::init(G1CollectedHeap* g1h, G1CollectionSet* collection_set) {
   _g1h = g1h;
   _collection_set = collection_set;
+  _imnotokay_policy_start_sec = os::elapsedTime();
 
   assert(Heap_lock->owned_by_self(), "Locking discipline.");
 
@@ -455,10 +457,50 @@ double G1Policy::imnotokay_recent_gc_to_app_time_severity() const {
   return MIN2(MAX2((recent_ratio - trigger_ratio) / recovery_window, 0.0), 1.0);
 }
 
+bool G1Policy::imnotokay_configuration_grace_active() const {
+  if (!UseImNotOkayGC || ImNotOkayConfigurationGracePeriodSeconds == 0) {
+    return false;
+  }
+
+  const double elapsed_sec = MAX2(os::elapsedTime() - _imnotokay_policy_start_sec, 0.0);
+  return elapsed_sec < (double)ImNotOkayConfigurationGracePeriodSeconds;
+}
+
+bool G1Policy::imnotokay_has_real_memory_pressure() const {
+  if (!UseImNotOkayGC || _g1h == nullptr) {
+    return false;
+  }
+
+  const uint max_regions = MAX2(_g1h->max_regions(), 1u);
+  const uint non_young_regions = _g1h->old_regions_count() + _g1h->humongous_regions_count();
+  const double non_young_percent = ((double)non_young_regions * 100.0) / (double)max_regions;
+
+  const bool occupancy_pressure = non_young_percent >= (double)ImNotOkayExecutionPressurePercent;
+  const bool cycle_pressure =
+    collector_state()->mark_or_rebuild_in_progress() ||
+    collector_state()->in_young_gc_before_mixed() ||
+    !collector_state()->in_young_only_phase() ||
+    _g1h->has_humongous_reclaim_candidates();
+
+  return occupancy_pressure || cycle_pressure;
+}
+
+bool G1Policy::imnotokay_policy_active() const {
+  if (!UseImNotOkayGC) {
+    return false;
+  }
+
+  if (imnotokay_configuration_grace_active()) {
+    return false;
+  }
+
+  return imnotokay_has_real_memory_pressure();
+}
+
 double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
   const double target_pause_time_ms = _mmu_tracker->max_gc_time() * 1000.0;
 
-  if (!UseImNotOkayGC || ImNotOkayPauseHeadroomPercent == 0) {
+  if (!imnotokay_policy_active() || ImNotOkayPauseHeadroomPercent == 0) {
     return target_pause_time_ms;
   }
 
@@ -505,7 +547,7 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
 double G1Policy::imnotokay_effective_burst_clamp_ratio(double base_time_ms,
                                                        double target_pause_time_ms,
                                                        double min_copy_time_ms) const {
-  if (!UseImNotOkayGC || ImNotOkayBurstEdenClampPercent == 0) {
+  if (!imnotokay_policy_active() || ImNotOkayBurstEdenClampPercent == 0) {
     return 0.0;
   }
 
@@ -582,7 +624,7 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
                                          uint absolute_max_young_length,
                                          double base_time_ms,
                                          double target_pause_time_ms) const {
-  if (!UseImNotOkayGC || ImNotOkayMaxYoungPercent == 0) {
+  if (!imnotokay_policy_active() || ImNotOkayMaxYoungPercent == 0) {
     return absolute_max_young_length;
   }
 
@@ -595,7 +637,7 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
                                                                                      ImNotOkayThroughputBackoffTriggerPercent);
   const double observed_gc_to_app_severity = imnotokay_recent_gc_to_app_time_severity();
   const double throughput_severity = MAX2(predicted_sustained_severity, observed_gc_to_app_severity);
-  if (throughput_severity >= 0.0) {
+  if (throughput_severity >= 1.0) {
     return absolute_max_young_length;
   }
 
@@ -1036,7 +1078,7 @@ void G1Policy::record_young_collection_end(bool concurrent_operation_is_full_mar
     app_time_ms = 1.0;
   }
 
-  if (UseImNotOkayGC) {
+  if (UseImNotOkayGC && !imnotokay_configuration_grace_active()) {
     const double gc_to_app_ratio = pause_time_ms / MAX2(app_time_ms, 1.0);
     _imnotokay_recent_gc_to_app_time_ratio_seq.add(gc_to_app_ratio);
   }

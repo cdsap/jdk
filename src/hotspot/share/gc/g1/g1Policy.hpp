@@ -110,6 +110,7 @@ class G1Policy: public CHeapObj<mtGC> {
 
   G1ConcurrentStartToMixedTimeTracker _concurrent_start_to_mixed;
   TruncatedSeq _imnotokay_recent_gc_to_app_time_ratio_seq;
+  double _imnotokay_policy_start_sec;
 
   bool should_update_surv_rate_group_predictors() {
     return collector_state()->in_young_only_phase() && !collector_state()->mark_or_rebuild_in_progress();
@@ -231,6 +232,19 @@ private:
   // Tighten the pause target under ImNotOkay when non-eden work already
   // consumes too much of the available pause budget.
   double adjusted_target_pause_time_ms(double base_time_ms) const;
+
+  // Android build workloads often have a short, allocation-heavy
+  // configuration phase where young throttling hurts throughput more than it
+  // helps pauses. Keep ImNotOkay disabled during that startup window.
+  bool imnotokay_configuration_grace_active() const;
+
+  // After the configuration window, only activate ImNotOkay sizing once old
+  // or humongous occupancy becomes meaningful, or once the collector is
+  // already transitioning into marking / mixed pressure handling.
+  bool imnotokay_has_real_memory_pressure() const;
+
+  // Combined phase gate for all ImNotOkay sizing heuristics.
+  bool imnotokay_policy_active() const;
 
   // Convert predicted non-eden pressure into a 0..1 severity score once it
   // enters the sustained heavy-build range.
