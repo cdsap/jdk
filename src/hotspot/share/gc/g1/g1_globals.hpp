@@ -122,20 +122,20 @@
           "on pressure-heavy Android build heaps.")                         \
           range(0, 50)                                                      \
                                                                             \
-  product(uint, ImNotOkayConfigurationGracePeriodSeconds, 60, EXPERIMENTAL, \
+  product(uint, ImNotOkayConfigurationGracePeriodSeconds, 150, EXPERIMENTAL, \
           "For the first N seconds after startup, keep ImNotOkay sizing "   \
           "adjustments disabled so short Android configuration phases can "  \
           "run with maximum throughput.")                                    \
           range(0, 600)                                                     \
                                                                             \
-  product(uint, ImNotOkayExecutionPressurePercent, 70, EXPERIMENTAL,        \
+  product(uint, ImNotOkayExecutionPressurePercent, 75, EXPERIMENTAL,        \
           "Outside the startup grace period, only activate ImNotOkay "      \
           "sizing adjustments once non-young regions consume at least this " \
           "percentage of the heap and GC is measurably eating into "        \
           "mutator time, or once mixed/marking pressure is already active.") \
           range(1, 100)                                                     \
                                                                             \
-  product(uint, ImNotOkayExecutionGcToAppActivationPercent, 12, EXPERIMENTAL, \
+  product(uint, ImNotOkayExecutionGcToAppActivationPercent, 16, EXPERIMENTAL, \
           "Outside the startup grace period, only treat plain old-region "  \
           "occupancy as real execution pressure once recent GC time reaches " \
           "at least this percentage of recent application time.")           \
