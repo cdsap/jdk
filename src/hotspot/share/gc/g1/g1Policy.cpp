@@ -457,16 +457,51 @@ double G1Policy::imnotokay_recent_gc_to_app_time_severity() const {
   return MIN2(MAX2((recent_ratio - trigger_ratio) / recovery_window, 0.0), 1.0);
 }
 
-bool G1Policy::imnotokay_configuration_grace_active() const {
+bool G1Policy::imnotokay_configuration_grace_active(double predicted_non_eden_time_ms,
+                                                    double target_pause_time_ms) const {
   if (!UseImNotOkayGC || ImNotOkayConfigurationGracePeriodSeconds == 0) {
     return false;
   }
 
   const double elapsed_sec = MAX2(os::elapsedTime() - _imnotokay_policy_start_sec, 0.0);
-  return elapsed_sec < (double)ImNotOkayConfigurationGracePeriodSeconds;
+  if (elapsed_sec >= (double)ImNotOkayConfigurationGracePeriodSeconds) {
+    return false;
+  }
+
+  if (_g1h == nullptr) {
+    return true;
+  }
+
+  if (collector_state()->mark_or_rebuild_in_progress() ||
+      _g1h->has_humongous_reclaim_candidates()) {
+    return false;
+  }
+
+  const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.num() > 0 ?
+                                        _imnotokay_recent_gc_to_app_time_ratio_seq.avg() : 0.0;
+  const double activation_ratio = (double)ImNotOkayExecutionGcToAppActivationPercent / 100.0;
+  const double non_young_percent = imnotokay_non_young_percent();
+  const double predicted_non_eden_ratio = target_pause_time_ms > 0.0 ?
+                                          predicted_non_eden_time_ms / target_pause_time_ms : 0.0;
+  const double predicted_pressure_trigger = (double)ImNotOkayThroughputBackoffTriggerPercent / 100.0;
+
+  return recent_gc_to_app_ratio < activation_ratio &&
+         non_young_percent < (double)ImNotOkayExecutionPressurePercent &&
+         predicted_non_eden_ratio < predicted_pressure_trigger;
 }
 
-bool G1Policy::imnotokay_has_real_memory_pressure() const {
+double G1Policy::imnotokay_non_young_percent() const {
+  if (_g1h == nullptr) {
+    return 0.0;
+  }
+
+  const uint max_regions = MAX2(_g1h->max_regions(), 1u);
+  const uint non_young_regions = _g1h->old_regions_count() + _g1h->humongous_regions_count();
+  return ((double)non_young_regions * 100.0) / (double)max_regions;
+}
+
+bool G1Policy::imnotokay_has_real_memory_pressure(double predicted_non_eden_time_ms,
+                                                  double target_pause_time_ms) const {
   if (!UseImNotOkayGC || _g1h == nullptr) {
     return false;
   }
@@ -476,42 +511,38 @@ bool G1Policy::imnotokay_has_real_memory_pressure() const {
     return true;
   }
 
-  if (_imnotokay_recent_gc_to_app_time_ratio_seq.num() == 0) {
-    return false;
-  }
-
-  const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.avg();
+  const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.num() > 0 ?
+                                        _imnotokay_recent_gc_to_app_time_ratio_seq.avg() : 0.0;
   const double activation_ratio = (double)ImNotOkayExecutionGcToAppActivationPercent / 100.0;
-
-  if (collector_state()->in_young_only_phase()) {
-    return false;
-  }
-
-  const uint max_regions = MAX2(_g1h->max_regions(), 1u);
-  const uint non_young_regions = _g1h->old_regions_count() + _g1h->humongous_regions_count();
-  const double non_young_percent = ((double)non_young_regions * 100.0) / (double)max_regions;
+  const double non_young_percent = imnotokay_non_young_percent();
   const bool non_young_occupancy_pressure =
     non_young_percent >= (double)ImNotOkayExecutionPressurePercent;
+  const double predicted_non_eden_ratio = target_pause_time_ms > 0.0 ?
+                                          predicted_non_eden_time_ms / target_pause_time_ms : 0.0;
+  const bool predicted_non_eden_pressure =
+    predicted_non_eden_ratio >= ((double)ImNotOkayThroughputBackoffTriggerPercent / 100.0);
 
-  return non_young_occupancy_pressure && recent_gc_to_app_ratio >= activation_ratio;
+  return non_young_occupancy_pressure &&
+         (recent_gc_to_app_ratio >= activation_ratio || predicted_non_eden_pressure);
 }
 
-bool G1Policy::imnotokay_policy_active() const {
+bool G1Policy::imnotokay_policy_active(double predicted_non_eden_time_ms,
+                                       double target_pause_time_ms) const {
   if (!UseImNotOkayGC) {
     return false;
   }
 
-  if (imnotokay_configuration_grace_active()) {
+  if (imnotokay_configuration_grace_active(predicted_non_eden_time_ms, target_pause_time_ms)) {
     return false;
   }
 
-  return imnotokay_has_real_memory_pressure();
+  return imnotokay_has_real_memory_pressure(predicted_non_eden_time_ms, target_pause_time_ms);
 }
 
 double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
   const double target_pause_time_ms = _mmu_tracker->max_gc_time() * 1000.0;
 
-  if (!imnotokay_policy_active() || ImNotOkayPauseHeadroomPercent == 0) {
+  if (!imnotokay_policy_active(base_time_ms, target_pause_time_ms) || ImNotOkayPauseHeadroomPercent == 0) {
     return target_pause_time_ms;
   }
 
@@ -558,7 +589,7 @@ double G1Policy::adjusted_target_pause_time_ms(double base_time_ms) const {
 double G1Policy::imnotokay_effective_burst_clamp_ratio(double base_time_ms,
                                                        double target_pause_time_ms,
                                                        double min_copy_time_ms) const {
-  if (!imnotokay_policy_active() || ImNotOkayBurstEdenClampPercent == 0) {
+  if (!imnotokay_policy_active(base_time_ms, target_pause_time_ms) || ImNotOkayBurstEdenClampPercent == 0) {
     return 0.0;
   }
 
@@ -594,7 +625,7 @@ uint G1Policy::adjusted_max_eden_length(uint min_eden_length,
                                         uint max_eden_length,
                                         double base_time_ms,
                                         double target_pause_time_ms) const {
-  if (!UseImNotOkayGC || ImNotOkayBurstEdenClampPercent == 0) {
+  if (!imnotokay_policy_active(base_time_ms, target_pause_time_ms) || ImNotOkayBurstEdenClampPercent == 0) {
     return max_eden_length;
   }
 
@@ -635,7 +666,7 @@ uint G1Policy::adjusted_max_young_length(uint absolute_min_young_length,
                                          uint absolute_max_young_length,
                                          double base_time_ms,
                                          double target_pause_time_ms) const {
-  if (!imnotokay_policy_active() || ImNotOkayMaxYoungPercent == 0) {
+  if (!imnotokay_policy_active(base_time_ms, target_pause_time_ms) || ImNotOkayMaxYoungPercent == 0) {
     return absolute_max_young_length;
   }
 

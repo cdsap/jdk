@@ -233,19 +233,25 @@ private:
   // consumes too much of the available pause budget.
   double adjusted_target_pause_time_ms(double base_time_ms) const;
 
-  // Android build workloads often have a short, allocation-heavy
-  // configuration phase where young throttling hurts throughput more than it
-  // helps pauses. Keep ImNotOkay disabled during that startup window.
-  bool imnotokay_configuration_grace_active() const;
+  // Android build workloads often have a short, allocation-heavy startup
+  // window where young throttling hurts throughput more than it helps pauses.
+  // Keep ImNotOkay disabled while startup still looks low-pressure, but let
+  // the grace period end early once retained pressure becomes visible.
+  bool imnotokay_configuration_grace_active(double predicted_non_eden_time_ms = 0.0,
+                                            double target_pause_time_ms = 0.0) const;
 
-  // After the configuration window, only activate ImNotOkay sizing once the
-  // collector is already in marking / mixed pressure handling, or when old
-  // occupancy is high enough and recent GC time is measurably eating into
-  // mutator time.
-  bool imnotokay_has_real_memory_pressure() const;
+  // Estimate current old/humongous occupancy as a percentage of the heap.
+  double imnotokay_non_young_percent() const;
+
+  // After startup, activate ImNotOkay sizing once retained pressure is
+  // visible, even if G1 is still in young-only mode. This is important for
+  // one-shot build workloads where pressure often ramps up before mixed GCs.
+  bool imnotokay_has_real_memory_pressure(double predicted_non_eden_time_ms = 0.0,
+                                          double target_pause_time_ms = 0.0) const;
 
   // Combined phase gate for all ImNotOkay sizing heuristics.
-  bool imnotokay_policy_active() const;
+  bool imnotokay_policy_active(double predicted_non_eden_time_ms = 0.0,
+                               double target_pause_time_ms = 0.0) const;
 
   // Convert predicted non-eden pressure into a 0..1 severity score once it
   // enters the sustained heavy-build range.
