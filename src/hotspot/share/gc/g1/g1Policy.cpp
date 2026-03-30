@@ -483,20 +483,17 @@ bool G1Policy::imnotokay_has_real_memory_pressure() const {
   const double recent_gc_to_app_ratio = _imnotokay_recent_gc_to_app_time_ratio_seq.avg();
   const double activation_ratio = (double)ImNotOkayExecutionGcToAppActivationPercent / 100.0;
 
-  const bool mixed_phase_pressure = !collector_state()->in_young_only_phase() &&
-                                    recent_gc_to_app_ratio >= activation_ratio;
-  if (mixed_phase_pressure) {
-    return true;
+  if (collector_state()->in_young_only_phase()) {
+    return false;
   }
 
   const uint max_regions = MAX2(_g1h->max_regions(), 1u);
   const uint non_young_regions = _g1h->old_regions_count() + _g1h->humongous_regions_count();
   const double non_young_percent = ((double)non_young_regions * 100.0) / (double)max_regions;
-  if (non_young_percent < (double)ImNotOkayExecutionPressurePercent) {
-    return false;
-  }
+  const bool non_young_occupancy_pressure =
+    non_young_percent >= (double)ImNotOkayExecutionPressurePercent;
 
-  return recent_gc_to_app_ratio >= activation_ratio;
+  return non_young_occupancy_pressure && recent_gc_to_app_ratio >= activation_ratio;
 }
 
 bool G1Policy::imnotokay_policy_active() const {
